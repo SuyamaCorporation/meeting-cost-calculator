@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会議コスト リアルタイム タイマー</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-4 md:p-8 transition-colors duration-500" id="bodyEl">
+<div class="max-w-2xl mx-auto">
+  <h1 class="text-2xl md:text-3xl font-bold text-white mb-1">会議コスト リアルタイム タイマー</h1>
+  <p class="text-gray-400 text-sm mb-6">Meeting Cost Real-Time Timer</p>
+
+  <!-- Inputs -->
+  <div class="bg-gray-800 rounded-xl p-5 mb-6" id="inputPanel">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label for="participants" class="block text-sm text-gray-300 mb-1">参加者数</label>
+        <div class="flex items-center gap-3">
+          <input type="range" id="participantsSlider" min="1" max="50" value="5"
+            class="flex-1 accent-indigo-500" aria-label="参加者数スライダー"
+            oninput="syncParticipants(this.value)">
+          <input type="number" id="participants" min="1" max="50" value="5"
+            class="w-20 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            oninput="syncParticipants(this.value)">
+        </div>
+      </div>
+      <div>
+        <label for="hourlyWage" class="block text-sm text-gray-300 mb-1">平均時給 (円/時)</label>
+        <div class="flex items-center gap-3">
+          <input type="range" id="hourlyWageSlider" min="1000" max="50000" step="500" value="3000"
+            class="flex-1 accent-indigo-500" aria-label="平均時給スライダー"
+            oninput="syncWage(this.value)">
+          <input type="number" id="hourlyWage" min="1000" max="50000" step="500" value="3000"
+            class="w-28 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-white text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            oninput="syncWage(this.value)">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Display -->
+  <div id="mainDisplay" class="rounded-2xl p-6 md:p-10 mb-6 text-center transition-colors duration-500 bg-gray-800">
+    <!-- Elapsed Time -->
+    <div class="text-sm text-gray-400 mb-1">経過時間</div>
+    <div id="elapsed" class="text-4xl md:text-5xl font-mono font-bold text-white mb-6">00:00:00</div>
+
+    <!-- Cost Display -->
+    <div class="text-sm text-gray-400 mb-2">現在のコスト</div>
+    <div id="costDisplay" class="text-5xl md:text-7xl font-bold text-white mb-2 leading-none transition-colors duration-500">¥0</div>
+
+    <!-- Cost per minute -->
+    <div class="text-sm text-gray-400 mt-3">
+      <span id="costPerMin" class="text-indigo-300 font-semibold">¥0</span> / 分
+      &nbsp;|&nbsp;
+      <span id="costPerSec" class="text-gray-400">¥0.00</span> / 秒
+    </div>
+
+    <!-- Urgency Bar -->
+    <div class="mt-4">
+      <div class="h-2 rounded-full bg-gray-700 overflow-hidden">
+        <div id="urgencyBar" class="h-full rounded-full transition-all duration-1000 bg-green-500" style="width:0%"></div>
+      </div>
+      <div class="flex justify-between text-xs text-gray-600 mt-1">
+        <span>¥0</span>
+        <span>¥10,000</span>
+        <span>¥50,000</span>
+        <span>¥100,000</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Control Buttons -->
+  <div class="flex justify-center gap-3 mb-6">
+    <button id="startBtn" onclick="startTimer()"
+      class="px-6 py-3 bg-green-600 hover:bg-green-700 rounded-xl text-white font-bold text-base transition-colors shadow-lg">
+      開始
+    </button>
+    <button id="pauseBtn" onclick="pauseTimer()" disabled
+      class="px-6 py-3 bg-yellow-600 hover:bg-yellow-700 rounded-xl text-white font-bold text-base transition-colors shadow-lg disabled:opacity-40 disabled:cursor-not-allowed">
+      一時停止
+    </button>
+    <button id="resetBtn" onclick="resetTimer()"
+      class="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded-xl text-white font-bold text-base transition-colors shadow-lg">
+      リセット
+    </button>
+  </div>
+
+  <!-- Cost Milestones -->
+  <div class="bg-gray-800 rounded-xl p-4">
+    <h2 class="text-xs text-gray-400 mb-3">コストマイルストーン</h2>
+    <div class="grid grid-cols-3 gap-3 text-center text-sm">
+      <div class="bg-gray-700 rounded-lg p-3">
+        <div class="text-green-400 font-semibold text-xs mb-1">¥10,000</div>
+        <div id="time10k" class="font-mono text-gray-200">—</div>
+      </div>
+      <div class="bg-gray-700 rounded-lg p-3">
+        <div class="text-yellow-400 font-semibold text-xs mb-1">¥50,000</div>
+        <div id="time50k" class="font-mono text-gray-200">—</div>
+      </div>
+      <div class="bg-gray-700 rounded-lg p-3">
+        <div class="text-red-400 font-semibold text-xs mb-1">¥100,000</div>
+        <div id="time100k" class="font-mono text-gray-200">—</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let timerInterval = null;
+let startTime = null;
+let pausedElapsed = 0;
+let running = false;
+
+function getParticipants() { return Math.max(1, parseInt(document.getElementById('participants').value, 10) || 1); }
+function getHourlyWage()   { return Math.max(1000, parseFloat(document.getElementById('hourlyWage').value) || 3000); }
+
+function costPerSecond() {
+  return (getParticipants() * getHourlyWage()) / 3600;
+}
+
+function formatTime(secs) {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = Math.floor(secs % 60);
+  return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
+
+function formatCost(c) {
+  return '¥' + Math.floor(c).toLocaleString('ja-JP');
+}
+
+function calcMilestone(yenTarget) {
+  const cps = costPerSecond();
+  if (cps <= 0) return null;
+  const secs = yenTarget / cps;
+  return formatTime(Math.ceil(secs));
+}
+
+function updateMilestones() {
+  document.getElementById('time10k').textContent  = calcMilestone(10000)  || '—';
+  document.getElementById('time50k').textContent  = calcMilestone(50000)  || '—';
+  document.getElementById('time100k').textContent = calcMilestone(100000) || '—';
+}
+
+function getElapsedSeconds() {
+  if (!running) return pausedElapsed;
+  return pausedElapsed + (Date.now() - startTime) / 1000;
+}
+
+function updateDisplay() {
+  const secs = getElapsedSeconds();
+  const cost = secs * costPerSecond();
+  const cpm  = costPerSecond() * 60;
+  const cps  = costPerSecond();
+
+  document.getElementById('elapsed').textContent = formatTime(secs);
+  document.getElementById('costDisplay').textContent = formatCost(cost);
+  document.getElementById('costPerMin').textContent = formatCost(cpm);
+  document.getElementById('costPerSec').textContent = '¥' + cps.toFixed(2);
+
+  // Urgency color
+  const display = document.getElementById('mainDisplay');
+  const costEl  = document.getElementById('costDisplay');
+  const bar     = document.getElementById('urgencyBar');
+
+  if (cost >= 100000) {
+    display.style.backgroundColor = '#450a0a';
+    costEl.style.color = '#fca5a5';
+    bar.style.backgroundColor = '#ef4444';
+    bar.style.width = '100%';
+  } else if (cost >= 50000) {
+    display.style.backgroundColor = '#422006';
+    costEl.style.color = '#fdba74';
+    bar.style.backgroundColor = '#f97316';
+    const pct = Math.min(100, ((cost - 50000) / 50000) * 50 + 50);
+    bar.style.width = pct.toFixed(1) + '%';
+  } else if (cost >= 10000) {
+    display.style.backgroundColor = '#422006';
+    costEl.style.color = '#fde68a';
+    bar.style.backgroundColor = '#eab308';
+    const pct = Math.min(50, ((cost - 10000) / 40000) * 50 + (10000 / 100000) * 100);
+    bar.style.width = pct.toFixed(1) + '%';
+  } else {
+    display.style.backgroundColor = '';
+    display.classList.add('bg-gray-800');
+    costEl.style.color = '#ffffff';
+    bar.style.backgroundColor = '#22c55e';
+    const pct = Math.min(10, (cost / 10000) * 10);
+    bar.style.width = pct.toFixed(1) + '%';
+  }
+}
+
+function startTimer() {
+  if (running) return;
+  running = true;
+  startTime = Date.now();
+  timerInterval = setInterval(updateDisplay, 100);
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('startBtn').classList.add('opacity-40','cursor-not-allowed');
+  document.getElementById('pauseBtn').disabled = false;
+}
+
+function pauseTimer() {
+  if (!running) return;
+  running = false;
+  pausedElapsed += (Date.now() - startTime) / 1000;
+  clearInterval(timerInterval);
+  timerInterval = null;
+  document.getElementById('startBtn').textContent = '再開';
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('startBtn').classList.remove('opacity-40','cursor-not-allowed');
+  document.getElementById('pauseBtn').disabled = true;
+  updateDisplay();
+}
+
+function resetTimer() {
+  running = false;
+  pausedElapsed = 0;
+  startTime = null;
+  clearInterval(timerInterval);
+  timerInterval = null;
+  document.getElementById('startBtn').textContent = '開始';
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('startBtn').classList.remove('opacity-40','cursor-not-allowed');
+  document.getElementById('pauseBtn').disabled = true;
+  const display = document.getElementById('mainDisplay');
+  display.style.backgroundColor = '';
+  const costEl = document.getElementById('costDisplay');
+  costEl.style.color = '#ffffff';
+  document.getElementById('urgencyBar').style.width = '0%';
+  document.getElementById('urgencyBar').style.backgroundColor = '#22c55e';
+  updateDisplay();
+}
+
+function syncParticipants(v) {
+  const val = Math.max(1, Math.min(50, parseInt(v, 10) || 1));
+  document.getElementById('participants').value = val;
+  document.getElementById('participantsSlider').value = val;
+  updateMilestones();
+  updateDisplay();
+}
+
+function syncWage(v) {
+  const val = Math.max(1000, Math.min(50000, parseFloat(v) || 3000));
+  document.getElementById('hourlyWage').value = val;
+  document.getElementById('hourlyWageSlider').value = val;
+  updateMilestones();
+  updateDisplay();
+}
+
+// Initialize
+updateMilestones();
+updateDisplay();
+</script>
+</body>
+</html>
